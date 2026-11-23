@@ -6,7 +6,8 @@
     "check": "tsc --noEmit",
     "build": "wrangler deploy --dry-run --config wrangler.jsonc",
     "deploy": "wrangler deploy --config wrangler.jsonc",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "db:local:verify": "node scripts/check-local-d1.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0"
