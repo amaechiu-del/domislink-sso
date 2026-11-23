@@ -6,7 +6,7 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 var __template = (cooked, raw) => __freeze(__defProp(cooked, "raw", { value: __freeze(raw || cooked.slice()) }));
 
 // Reuse the reviewed portable Church password implementation.
-import { randomToken, sha256, verifyPassword, hashPassword, readCookie } from "../../../src/security.ts";
+import { randomToken, sha256, verifyPassword, hashPassword, readCookie } from "../security.ts";
 
 // src/identity-channels.ts
 var EMAIL_OTP_MINUTES = 10;
