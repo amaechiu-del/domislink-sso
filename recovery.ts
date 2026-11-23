@@ -1,4 +1,4 @@
-import { hashPassword, randomToken, sha256, readCookie } from '../../src/security';
+import { hashPassword, randomToken, sha256, readCookie } from './security.ts';
 type Env={DB:D1Database;RESEND_API_KEY?:string};
 type Views={forgot:(csrf:string,error?:string)=>string;reset:(email:string,csrf:string,error?:string)=>string;send:(env:Env,email:string,code:string)=>Promise<void>;limit:(env:Env,key:string,limit:number,window:number,now:Date)=>Promise<boolean>};
 const cookie=(value:string,age=300)=>`dl_sso_csrf=${encodeURIComponent(value)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${age}`;
