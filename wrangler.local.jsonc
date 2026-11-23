@@ -1,0 +1,25 @@
+{
+  "name": "domislink-sso-local",
+  "main": "recovered/index.js",
+  "compatibility_date": "2025-01-09",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "WORKER": "domislink-sso-local",
+    "APP_ORIGIN": "http://localhost:8787",
+    "SSO_ISSUER": "https://sso.domislink.com",
+    "SSO_ALLOWED_ORIGINS": "https://church.domislink.com",
+    "OIDC_KEY_ID": "domislink-sso-2026",
+    "WEBAUTHN_RP_ID": "domislink.com",
+    "WEBAUTHN_RP_NAME": "DomisLink"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "domislink-sso-local",
+      "database_id": "00000000-0000-4000-8000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
