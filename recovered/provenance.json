@@ -1,0 +1,16 @@
+{
+  "source_version": "354c6d43",
+  "captured_date": "2026-11-20",
+  "normalized_capture_sha256": "29e9d774bd98ef85b9344864cf6a722d6d53158554be61bfc6650f20f3f085ab",
+  "source": "Cloudflare active version read-only editor",
+  "changes": [
+    "Replace captured security helper section with imports from reviewed src/security.ts",
+    "Remove unavailable source-map reference",
+    "Correct double-escaped Bearer whitespace regex in userinfo authentication",
+    "Delegate password recovery to the tested atomic, bounded module using the existing verification table",
+    "Serve password login with CSRF, preserve authorization targets for email/passkey alternatives, and provide account landing",
+    "Recognize the shared Resend sender setting, trim credentials, and expose allowlisted rejection reasons only",
+    "Delegate SMS OTP to bounded Termii adapter requiring approved sender and provider message id"
+  ],
+  "schema": "Existing production 0040/0041/0042; test fixtures only, no new production migration"
+}
