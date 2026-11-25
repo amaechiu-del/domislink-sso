@@ -667,6 +667,26 @@ async function adstudioAccessToken(env, userId) {
   return idToken(env, { sub: userId, aud: "domislink-adstudio", exp: now + 900, nbf: now, jti: crypto.randomUUID(), adstudio_roles: allowed });
 }
 __name(adstudioAccessToken, "adstudioAccessToken");
+async function clientAccessToken(env, clientId, subject) {
+  if (clientId === "domislink-adstudio") return adstudioAccessToken(env, subject);
+  if (!env.REGISTRY_OIDC_CLIENT_ID || clientId !== env.REGISTRY_OIDC_CLIENT_ID) return null;
+  let grants;
+  try { grants = JSON.parse(env.REGISTRY_ACCESS_GRANTS || "{}"); } catch { return null; }
+  if (!grants || Array.isArray(grants) || typeof grants !== "object" || !Object.hasOwn(grants, subject)) return null;
+  const grant = grants[subject];
+  if (grant !== "reader" && grant !== "admin") return null;
+  const admin = grant === "admin";
+  const now = Math.floor(Date.now() / 1000);
+  return idToken(env, {
+    sub: subject,
+    aud: "domislink-central-services-registry",
+    scope: admin ? "services:read services:write" : "services:read",
+    roles: admin ? ["domislink:services:admin"] : [],
+    exp: now + 900,
+    nbf: now,
+    jti: crypto.randomUUID()
+  });
+}
 async function jwks(env) {
   if (!env.OIDC_PUBLIC_KEY_PEM) throw new Error("OIDC_PUBLIC_KEY_PEM is not configured");
   const key = await crypto.subtle.importKey("spki", pemBytes(env.OIDC_PUBLIC_KEY_PEM), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, true, ["verify"]);
@@ -905,7 +925,7 @@ async function handle(request, env) {
       ]);
       const phoneVerified = user.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(user.id, user.phone).first() : null;
       const token = await idToken(env, { sub: user.id, aud: clientId, exp: Math.floor(accessExpiry.getTime() / 1e3), nonce: row.nonce || void 0, email: row.scope.includes("email") && user.email_verified_at ? user.email : void 0, email_verified: row.scope.includes("email") ? Boolean(user.email_verified_at) : void 0, phone_number: row.scope.includes("phone") && phoneVerified ? user.phone : void 0, phone_number_verified: row.scope.includes("phone") ? Boolean(phoneVerified) : void 0, name: row.scope.includes("profile") ? user.full_name : void 0 });
-      const apiToken = clientId === "domislink-adstudio" ? await adstudioAccessToken(env, user.id) : access;
+      const apiToken = await clientAccessToken(env, clientId, user.id);
       return json3({ access_token: apiToken || access, token_type: "Bearer", expires_in: apiToken ? 900 : ACCESS_SECONDS, refresh_token: refresh, id_token: token, scope: row.scope });
     }
     if (grant === "refresh_token") {
@@ -921,7 +941,7 @@ async function handle(request, env) {
       ]);
       const phoneVerified = user.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(user.id, user.phone).first() : null;
       const token = await idToken(env, { sub: user.id, aud: clientId, exp: Math.floor(accessExpiry.getTime() / 1e3), email: row.scope.includes("email") && user.email_verified_at ? user.email : void 0, email_verified: row.scope.includes("email") ? Boolean(user.email_verified_at) : void 0, phone_number: row.scope.includes("phone") && phoneVerified ? user.phone : void 0, phone_number_verified: row.scope.includes("phone") ? Boolean(phoneVerified) : void 0, name: row.scope.includes("profile") ? user.full_name : void 0 });
-      const apiToken = clientId === "domislink-adstudio" ? await adstudioAccessToken(env, user.id) : access;
+      const apiToken = await clientAccessToken(env, clientId, user.id);
       return json3({ access_token: apiToken || access, token_type: "Bearer", expires_in: apiToken ? 900 : ACCESS_SECONDS, refresh_token: nextRefresh, id_token: token, scope: row.scope });
     }
     return json3({ error: "unsupported_grant_type" }, 400);
