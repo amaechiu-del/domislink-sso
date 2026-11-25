@@ -119,6 +119,7 @@ async function createOrFindUser(env, channel, destination, fullName) {
 }
 __name(createOrFindUser, "createOrFindUser");
 async function startOtp(request, env, channel) {
+  if (env.APP_ENV === "staging" && env.STAGING_OTP_DELIVERY_ENABLED !== "true") return json({ error: "Staging OTP delivery is disabled." }, 503);
   const body = await request.json().catch(() => ({}));
   const emailInput = typeof body?.email === "string" ? body.email : "";
   const phoneInput = typeof body?.phone === "string" ? body.phone : "";
