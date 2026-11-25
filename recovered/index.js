@@ -975,19 +975,22 @@ async function handle(request, env) {
     await env.DB.prepare("INSERT INTO platform_tenant_memberships(id,tenant_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,'owner','active',?,?) ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='owner',status='active',updated_at=excluded.updated_at").bind(crypto.randomUUID(), tenant.id, owner.id, now, now).run();
     return json3({ tenant_id: tenant.id, product_key: productKey, resource_id: resourceId, display_name: displayName }, 201);
   }
-  if (path.startsWith("/admin/clients") && request.method === "POST") {
+  if (path === "/admin/clients" && request.method === "POST") {
     const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     if (!env.SSO_ADMIN_API_KEY || supplied !== env.SSO_ADMIN_API_KEY) return json3({ error: "unauthorized" }, 401);
-    const body = await request.json();
-    const name = body.client_name?.trim(), redirects = body.redirect_uris;
-    if (!name || !Array.isArray(redirects) || redirects.length < 1 || redirects.length > 20 || redirects.some((uri) => {
+    let body;
+    try { body = await request.json(); } catch { return json3({ error: "invalid_json" }, 400); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json3({ error: "invalid_client_registration" }, 400);
+    const name = typeof body.client_name === "string" ? body.client_name.trim() : "", redirects = body.redirect_uris;
+    if (!name || name.length > 160 || !Array.isArray(redirects) || redirects.length < 1 || redirects.length > 20 || redirects.some((uri) => {
       try {
         const u = new URL(uri);
-        return u.protocol !== "https:" && u.hostname !== "localhost";
+        return typeof uri !== "string" || !!u.username || !!u.password || !!u.hash || !(u.protocol === "https:" || (u.protocol === "http:" && u.hostname === "localhost"));
       } catch {
         return true;
       }
     })) return json3({ error: "invalid_client_registration" }, 400);
+    if (body.allowed_scopes !== undefined && (!Array.isArray(body.allowed_scopes) || body.allowed_scopes.some(s => !["openid", "profile", "email", "phone"].includes(s)))) return json3({ error: "invalid_scopes" }, 400);
     const clientId = "dl_" + randomToken(24), scopes = (body.allowed_scopes || ["openid", "profile", "email", "phone"]).filter((s) => ["openid", "profile", "email", "phone"].includes(s));
     await env.DB.prepare("INSERT INTO sso_clients(client_id,client_name,redirect_uris,allowed_scopes,enabled,created_at) VALUES(?,?,?,?,1,?)").bind(clientId, name, JSON.stringify(redirects), scopes.join(" "), (/* @__PURE__ */ new Date()).toISOString()).run();
     return json3({ client_id: clientId, client_name: name, redirect_uris: redirects, allowed_scopes: scopes }, 201);
