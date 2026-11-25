@@ -1,0 +1,9 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {validateManifest} from "../sdk/application-manifest.mjs";
+import {beginAuthorization,exchangeAuthorization} from "../sdk/pkce.mjs";
+const manifest={application_id:"registry",repository:"amaechiu-del/domislink-services-registry",environment:"staging",origin:"https://registry-staging.example.workers.dev",redirect_uri:"https://registry-staging.example.workers.dev/callback",scopes:["openid","email"]};
+test("valid manifest normalizes scopes",()=>assert.deepEqual(validateManifest({...manifest,scopes:["openid","email","email"]}).scopes,["openid","email"]));
+test("manifest rejects cross-origin callback and production origin in staging",()=>{for(const m of [{...manifest,redirect_uri:"https://other.example/callback"},{...manifest,origin:"https://church.domislink.com",redirect_uri:"https://church.domislink.com/callback"},{...manifest,scopes:["openid","admin"]}])assert.throws(()=>validateManifest(m));});
+test("PKCE challenge is SHA256 of verifier",async()=>{const {url,transaction:t}=await beginAuthorization({environment:"staging",clientId:"dl_test",redirectUri:manifest.redirect_uri});const u=new URL(url);const expected=Buffer.from(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(t.verifier))).toString("base64url");assert.equal(u.searchParams.get("code_challenge"),expected);assert.equal(u.searchParams.get("state"),t.state);assert.equal(u.searchParams.get("nonce"),t.nonce);});
+test("invalid state and expired transaction rejected before exchange",async()=>{const {transaction:t}=await beginAuthorization({environment:"staging",clientId:"dl_test",redirectUri:manifest.redirect_uri});await assert.rejects(exchangeAuthorization(t,manifest.redirect_uri+"?state=wrong&code=test"));await assert.rejects(exchangeAuthorization({...t,expiresAt:0},manifest.redirect_uri+"?state="+t.state+"&code=test"));});
