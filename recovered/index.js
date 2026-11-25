@@ -250,15 +250,19 @@ function isDomisLinkOrigin(origin) {
   }
 }
 __name(isDomisLinkOrigin, "isDomisLinkOrigin");
-function trustedOrigin(request) {
-  return isDomisLinkOrigin(request.headers.get("Origin") || "");
+function identityOrigin(origin, env) {
+  if (env.APP_ENV === "staging") return origin === "https://domislink-sso-registry-staging.amaechi-u.workers.dev" && env.WEBAUTHN_RP_ID === "domislink-sso-registry-staging.amaechi-u.workers.dev";
+  return isDomisLinkOrigin(origin);
+}
+function trustedOrigin(request, env) {
+  return identityOrigin(request.headers.get("Origin") || "", env);
 }
 __name(trustedOrigin, "trustedOrigin");
-function parseClientData(raw, expectedType, challenge, request) {
+function parseClientData(raw, expectedType, challenge, request, env) {
   const bytes = fromB64url(raw);
   const client = JSON.parse(new TextDecoder().decode(bytes));
   const requestOrigin = request.headers.get("Origin") || "";
-  if (client.type !== expectedType || client.challenge !== challenge || !isDomisLinkOrigin(client.origin || "") || client.origin !== requestOrigin || client.crossOrigin === true) {
+  if (client.type !== expectedType || client.challenge !== challenge || !identityOrigin(client.origin || "", env) || client.origin !== requestOrigin || client.crossOrigin === true) {
     throw new Error("WebAuthn client data validation failed.");
   }
   return bytes;
@@ -406,7 +410,7 @@ async function registerVerify(request, env) {
   try {
     const clientData = JSON.parse(new TextDecoder().decode(fromB64url(body.response.clientDataJSON)));
     if (!clientData.challenge) throw new Error("Missing registration challenge.");
-    parseClientData(body.response.clientDataJSON, "webauthn.create", clientData.challenge, request);
+    parseClientData(body.response.clientDataJSON, "webauthn.create", clientData.challenge, request, env);
     const challenge = await consumeChallenge(env, clientData.challenge, user.id, "registration");
     if (!challenge) throw new Error("Registration challenge expired or already used.");
     const attestation = decodeCbor(fromB64url(body.response.attestationObject)).value;
@@ -444,7 +448,7 @@ async function authenticationVerify(request, env) {
     const challengeHash = await sha256(clientData.challenge), now = (/* @__PURE__ */ new Date()).toISOString();
     const challengeRow = await env.DB.prepare("SELECT user_id FROM sso_webauthn_challenges WHERE challenge_hash=? AND purpose='authentication' AND used_at IS NULL AND expires_at>?").bind(challengeHash, now).first();
     if (!challengeRow) throw new Error("Passkey sign-in challenge expired or invalid.");
-    parseClientData(body.response.clientDataJSON, "webauthn.get", clientData.challenge, request);
+    parseClientData(body.response.clientDataJSON, "webauthn.get", clientData.challenge, request, env);
     const credentialId = b64url(fromB64url(body.rawId));
     const passkey = await env.DB.prepare("SELECT credential_id,user_id,public_key_json,algorithm,sign_count FROM sso_passkeys WHERE credential_id=? LIMIT 1").bind(credentialId).first();
     if (!passkey || challengeRow.user_id && challengeRow.user_id !== passkey.user_id) throw new Error("This passkey is not registered to a valid DomisLink identity.");
@@ -490,7 +494,7 @@ async function deletePasskey(request, env) {
 }
 __name(deletePasskey, "deletePasskey");
 async function handlePasskey(request, env, path) {
-  if ((path.startsWith("/auth/passkeys/") || path === "/auth/passkeys" && request.method === "DELETE") && !trustedOrigin(request)) return json2({ error: "trusted_origin_required" }, 403);
+  if ((path.startsWith("/auth/passkeys/") || path === "/auth/passkeys" && request.method === "DELETE") && !trustedOrigin(request, env)) return json2({ error: "trusted_origin_required" }, 403);
   if (path === "/auth/passkeys/register/options" && request.method === "POST") return registerOptions(request, env);
   if (path === "/auth/passkeys/register/verify" && request.method === "POST") return registerVerify(request, env);
   if (path === "/auth/passkeys/authenticate/options" && request.method === "POST") return authenticationOptions(request, env);
