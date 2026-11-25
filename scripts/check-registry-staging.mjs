@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { sign, verify } from "node:crypto";
+const config = JSON.parse(readFileSync(process.argv[2] || "wrangler.registry-staging.local.jsonc","utf8"));
+const host = "domislink-sso-registry-staging.amaechi-u.workers.dev";
+assert.equal(config.name,"domislink-sso-registry-staging");
+assert.equal(config.account_id,"03713ca2567633c4ab85e5ab8ef47cde");
+assert.equal(config.main,"recovered/index.js");
+assert.equal(config.workers_dev,false);
+assert.equal(config.preview_urls,false);
+for(const key of ["route","routes","triggers","services","env"]) assert.ok(!Object.hasOwn(config,key),"Unexpected binding or route: "+key);
+assert.equal(config.d1_databases.length,1);
+assert.equal(config.d1_databases[0].binding,"DB");
+assert.equal(config.d1_databases[0].database_id,"a9fbade6-42b8-45b8-9afd-0c6558a4261d");
+assert.equal(config.vars.APP_ENV,"staging");
+assert.equal(config.vars.SSO_ISSUER,"https://"+host);
+assert.equal(config.vars.APP_ORIGIN,"https://"+host);
+assert.equal(config.vars.WEBAUTHN_RP_ID,host);
+const dir=process.env.DOMISLINK_SECRET_DIR;
+assert.ok(dir,"Set DOMISLINK_SECRET_DIR");
+const read=name=>readFileSync(join(dir,name));
+const msg=Buffer.from("staging readiness");
+assert.ok(verify("sha256",msg,read("OIDC_PUBLIC_KEY_PEM"),sign("sha256",msg,read("OIDC_PRIVATE_KEY_PEM"))),"RSA verification failed");
+for(const name of ["SSO_ADMIN_API_KEY","SSO_INTERNAL_API_KEY"]) assert.match(read(name).toString().trim(),/^[a-f0-9]{64}$/);
+console.log("Private staging configuration and local credentials: PASS");
+if(!/^dl_[A-Za-z0-9_-]+$/.test(config.vars.REGISTRY_OIDC_CLIENT_ID||"")){
+  console.log("Registry client registration: PENDING");
+  process.exitCode=2;
+}
