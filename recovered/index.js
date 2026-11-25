@@ -705,8 +705,9 @@ __name(authorizedTenant, "authorizedTenant");
 function allowedOrigin(request, env) {
   const origin = request.headers.get("Origin");
   if (!origin) return null;
-  const allowed = (env.SSO_ALLOWED_ORIGINS || "https://church.domislink.com").split(",").map((v) => v.trim()).filter(Boolean);
+  const allowed = (env.SSO_ALLOWED_ORIGINS || (env.APP_ENV === "staging" ? "" : "https://church.domislink.com")).split(",").map((v) => v.trim()).filter(Boolean);
   if (allowed.includes(origin)) return origin;
+  if (env.APP_ENV === "staging") return null;
   try {
     const parsed = new URL(origin);
     if (parsed.protocol === "https:" && (parsed.hostname === "domislink.com" || parsed.hostname.endsWith(".domislink.com"))) return origin;
