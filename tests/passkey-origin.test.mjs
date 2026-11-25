@@ -1,0 +1,14 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import {readFileSync} from "node:fs";
+const source=readFileSync(new URL("../recovered/index.js",import.meta.url),"utf8");
+const start=source.indexOf("function isDomisLinkOrigin("),end=source.indexOf("function parseClientData(",start);
+assert.ok(start>=0&&end>start);
+const check=vm.runInNewContext(source.slice(start,end)+"\ntrustedOrigin",{URL,__name:()=>{}});
+const host="domislink-sso-registry-staging.amaechi-u.workers.dev";
+const env={APP_ENV:"staging",WEBAUTHN_RP_ID:host};
+const req=origin=>new Request("https://"+host,{headers:{Origin:origin}});
+test("staging accepts exact origin and RP",()=>assert.equal(check(req("https://"+host),env),true));
+test("staging rejects production and mismatched RP",()=>{assert.equal(check(req("https://sso.domislink.com"),env),false);assert.equal(check(req("https://"+host),{...env,WEBAUTHN_RP_ID:"domislink.com"}),false);});
+test("production rejects staging origin",()=>assert.equal(check(req("https://"+host),{}),false));
