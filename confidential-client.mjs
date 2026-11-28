@@ -24,3 +24,15 @@ export async function authenticateTokenClient(db,form){
  if(!row||row.client_id!==id)return false;
  return authenticateClient({record:row.secret_hash===null?null:row,secret:form.get('client_secret')});
 }
+
+export async function registerConfidentialClient(db,{clientId,name,redirects,scopes,now}){
+ if(typeof clientId!=='string'||!/^dl_[A-Za-z0-9_-]{20,128}$/.test(clientId)||typeof name!=='string'||!name.trim()||name.length>200||!Array.isArray(redirects)||!redirects.length||redirects.length>20||new Set(redirects).size!==redirects.length||!Array.isArray(scopes)||!scopes.includes('openid')||scopes.some(s=>!['openid','profile','email','phone'].includes(s)))throw Error('Invalid confidential registration');
+ for(const uri of redirects){if(typeof uri!=='string'||uri.length>2048)throw Error('Invalid redirect');const u=new URL(uri);if(u.protocol!=='https:'||u.username||u.password||u.hash||uri.includes('#'))throw Error('Invalid redirect')}
+ const {secret,secretHash}=await generateClientSecret();
+ const results=await db.batch([
+  db.prepare('INSERT INTO sso_clients(client_id,client_name,redirect_uris,allowed_scopes,enabled,created_at) VALUES(?,?,?,?,1,?)').bind(clientId,name,JSON.stringify(redirects),scopes.join(' '),now),
+  db.prepare('INSERT INTO sso_confidential_clients(client_id,secret_hash,created_at) VALUES(?,?,?)').bind(clientId,secretHash,now)
+ ]);
+ if(!Array.isArray(results)||results.length!==2||results.some(r=>r.success!==true))throw Error('Registration failed');
+ return {client_id:clientId,client_name:name,redirect_uris:redirects,allowed_scopes:scopes,client_secret:secret,token_endpoint_auth_method:'client_secret_post'};
+}

@@ -1,4 +1,4 @@
-import { authenticateTokenClient } from "../confidential-client.mjs";
+import { authenticateTokenClient, registerConfidentialClient } from "../confidential-client.mjs";
 import { sendSmsOtp } from "../sms.ts";
 import { handleRecovery } from "../recovery.ts";
 var __freeze = Object.freeze;
@@ -960,6 +960,14 @@ async function handle(request, env) {
     const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     if (!env.SSO_ADMIN_API_KEY || supplied !== env.SSO_ADMIN_API_KEY) return json3({ error: "unauthorized" }, 401);
     const body = await request.json();
+    if (body?.token_endpoint_auth_method === "client_secret_post") {
+      if (path !== "/admin/clients") return json3({ error: "invalid_client_registration" }, 400);
+      try {
+        const result = await registerConfidentialClient(env.DB, {clientId:"dl_"+randomToken(24),name:body.client_name,redirects:body.redirect_uris,scopes:body.allowed_scopes,now:new Date().toISOString()});
+        return new Response(JSON.stringify(result),{status:201,headers:{"Content-Type":"application/json","Cache-Control":"no-store","Pragma":"no-cache"}});
+      } catch { return json3({error:"client_registration_failed"},400); }
+    }
+    if (body?.token_endpoint_auth_method !== undefined && body.token_endpoint_auth_method !== "none") return json3({error:"invalid_client_registration"},400);
     const name = body.client_name?.trim(), redirects = body.redirect_uris;
     if (!name || !Array.isArray(redirects) || redirects.length < 1 || redirects.length > 20 || redirects.some((uri) => {
       try {
