@@ -1,3 +1,5 @@
+import {handleRunner} from "../runner-http.mjs";
+import { authenticateTokenClient, registerConfidentialClient, rotateConfidentialClient, revokeConfidentialClient, hashClientSecret, guardedGrantInsert, requireGrantPair } from "../confidential-client.mjs";
 import { sendSmsOtp } from "../sms.ts";
 import { handleRecovery } from "../recovery.ts";
 var __freeze = Object.freeze;
@@ -250,15 +252,17 @@ function isDomisLinkOrigin(origin) {
   }
 }
 __name(isDomisLinkOrigin, "isDomisLinkOrigin");
-function trustedOrigin(request) {
-  return isDomisLinkOrigin(request.headers.get("Origin") || "");
+function stagingIdentity(env) { return env.WORKER === "domislink-sso-confidential-staging"; }
+function trustedOrigin(request, env) {
+  const origin=request.headers.get("Origin") || "";
+  return stagingIdentity(env) ? origin === env.SSO_ISSUER : isDomisLinkOrigin(origin);
 }
 __name(trustedOrigin, "trustedOrigin");
-function parseClientData(raw, expectedType, challenge, request) {
+function parseClientData(raw, expectedType, challenge, request, env) {
   const bytes = fromB64url(raw);
   const client = JSON.parse(new TextDecoder().decode(bytes));
   const requestOrigin = request.headers.get("Origin") || "";
-  if (client.type !== expectedType || client.challenge !== challenge || !isDomisLinkOrigin(client.origin || "") || client.origin !== requestOrigin || client.crossOrigin === true) {
+  if (client.type !== expectedType || client.challenge !== challenge || !trustedOrigin(request, env) || client.origin !== requestOrigin || client.crossOrigin === true) {
     throw new Error("WebAuthn client data validation failed.");
   }
   return bytes;
@@ -406,7 +410,7 @@ async function registerVerify(request, env) {
   try {
     const clientData = JSON.parse(new TextDecoder().decode(fromB64url(body.response.clientDataJSON)));
     if (!clientData.challenge) throw new Error("Missing registration challenge.");
-    parseClientData(body.response.clientDataJSON, "webauthn.create", clientData.challenge, request);
+    parseClientData(body.response.clientDataJSON, "webauthn.create", clientData.challenge, request, env);
     const challenge = await consumeChallenge(env, clientData.challenge, user.id, "registration");
     if (!challenge) throw new Error("Registration challenge expired or already used.");
     const attestation = decodeCbor(fromB64url(body.response.attestationObject)).value;
@@ -444,7 +448,7 @@ async function authenticationVerify(request, env) {
     const challengeHash = await sha256(clientData.challenge), now = (/* @__PURE__ */ new Date()).toISOString();
     const challengeRow = await env.DB.prepare("SELECT user_id FROM sso_webauthn_challenges WHERE challenge_hash=? AND purpose='authentication' AND used_at IS NULL AND expires_at>?").bind(challengeHash, now).first();
     if (!challengeRow) throw new Error("Passkey sign-in challenge expired or invalid.");
-    parseClientData(body.response.clientDataJSON, "webauthn.get", clientData.challenge, request);
+    parseClientData(body.response.clientDataJSON, "webauthn.get", clientData.challenge, request, env);
     const credentialId = b64url(fromB64url(body.rawId));
     const passkey = await env.DB.prepare("SELECT credential_id,user_id,public_key_json,algorithm,sign_count FROM sso_passkeys WHERE credential_id=? LIMIT 1").bind(credentialId).first();
     if (!passkey || challengeRow.user_id && challengeRow.user_id !== passkey.user_id) throw new Error("This passkey is not registered to a valid DomisLink identity.");
@@ -490,7 +494,7 @@ async function deletePasskey(request, env) {
 }
 __name(deletePasskey, "deletePasskey");
 async function handlePasskey(request, env, path) {
-  if ((path.startsWith("/auth/passkeys/") || path === "/auth/passkeys" && request.method === "DELETE") && !trustedOrigin(request)) return json2({ error: "trusted_origin_required" }, 403);
+  if ((path.startsWith("/auth/passkeys/") || path === "/auth/passkeys" && request.method === "DELETE") && !trustedOrigin(request, env)) return json2({ error: "trusted_origin_required" }, 403);
   if (path === "/auth/passkeys/register/options" && request.method === "POST") return registerOptions(request, env);
   if (path === "/auth/passkeys/register/verify" && request.method === "POST") return registerVerify(request, env);
   if (path === "/auth/passkeys/authenticate/options" && request.method === "POST") return authenticationOptions(request, env);
@@ -685,6 +689,7 @@ __name(authorizedTenant, "authorizedTenant");
 function allowedOrigin(request, env) {
   const origin = request.headers.get("Origin");
   if (!origin) return null;
+  if (stagingIdentity(env)) return origin === env.SSO_ISSUER ? origin : null;
   const allowed = (env.SSO_ALLOWED_ORIGINS || "https://church.domislink.com").split(",").map((v) => v.trim()).filter(Boolean);
   if (allowed.includes(origin)) return origin;
   try {
@@ -777,7 +782,7 @@ __name(handleWhatsAppWebhook, "handleWhatsAppWebhook");
 async function fetchCurrentUser(request, env) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
-  const row = await env.DB.prepare("SELECT u.id,u.email,u.full_name,u.email_verified_at,u.phone,t.client_id,t.scope FROM sso_access_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>? AND u.status='active' LIMIT 1").bind(await sha256(token), (/* @__PURE__ */ new Date()).toISOString()).first();
+  const row = await env.DB.prepare("SELECT u.id,u.email,u.full_name,u.email_verified_at,u.phone,t.client_id,t.scope FROM sso_access_tokens t JOIN users u ON u.id=t.user_id JOIN sso_clients c ON c.client_id=t.client_id AND c.enabled=1 WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>? AND u.status='active' LIMIT 1").bind(await sha256(token), (/* @__PURE__ */ new Date()).toISOString()).first();
   if (!row) return null;
   const verifiedPhone = row.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(row.id, row.phone).first() : null;
   return { id: row.id, email: row.email_verified_at ? row.email : void 0, phone: verifiedPhone?.phone_e164, fullName: row.full_name, clientId: row.client_id, scope: row.scope };
@@ -786,6 +791,8 @@ __name(fetchCurrentUser, "fetchCurrentUser");
 async function handle(request, env) {
   const url = new URL(request.url), path = url.pathname;
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+  const runnerResponse=await handleRunner(request,env,claims=>idToken(env,claims));
+  if(runnerResponse)return runnerResponse;
   const recovery=await handleRecovery(request,env,path,{forgot:forgotPasswordHtml,reset:resetPasswordHtml,send:sendEmailOtp,limit:consumeRateLimit});
   if(recovery)return recovery;
   const identityChannelResponse = await handleIdentityChannel(request, env, path);
@@ -815,7 +822,8 @@ async function handle(request, env) {
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["RS256"],
     scopes_supported: ["openid", "profile", "email", "phone"],
-    token_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
+    revocation_endpoint_auth_methods_supported: ["none", "client_secret_post"],
     code_challenge_methods_supported: ["S256"]
   });
   if (path === "/oauth/jwks") {
@@ -886,6 +894,8 @@ async function handle(request, env) {
   }
   if (path === "/oauth/token" && request.method === "POST") {
     const form = await request.formData(), grant = String(form.get("grant_type") || ""), clientId = String(form.get("client_id") || "");
+    if (!await authenticateTokenClient(env.DB, form)) return json3({ error: "invalid_client" }, 401);
+    const credentialHash = form.get("client_secret") === null ? null : await hashClientSecret(form.get("client_secret"));
     if (grant === "authorization_code") {
       const code = String(form.get("code") || ""), redirectUri = String(form.get("redirect_uri") || ""), verifier = String(form.get("code_verifier") || "");
       if (!code || !verifier || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return json3({ error: "invalid_grant" }, 400);
@@ -899,10 +909,10 @@ async function handle(request, env) {
       const user = await env.DB.prepare("SELECT id,email,full_name,email_verified_at,phone FROM users WHERE id=? AND status='active'").bind(row.user_id).first();
       if (!user) return json3({ error: "invalid_grant" }, 400);
       const access = randomToken(32), refresh = randomToken(48), now = /* @__PURE__ */ new Date(), accessExpiry = new Date(now.getTime() + ACCESS_SECONDS * 1e3), refreshExpiry = new Date(now.getTime() + REFRESH_SECONDS * 1e3);
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO sso_access_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(access), clientId, user.id, row.scope, accessExpiry.toISOString()),
-        env.DB.prepare("INSERT INTO sso_refresh_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(refresh), clientId, user.id, row.scope, refreshExpiry.toISOString())
-      ]);
+      try { requireGrantPair(await env.DB.batch([
+        guardedGrantInsert(env.DB,"sso_access_tokens",{tokenHash:await sha256(access),clientId,userId:user.id,scope:row.scope,expiresAt:accessExpiry.toISOString(),credentialHash}),
+        guardedGrantInsert(env.DB,"sso_refresh_tokens",{tokenHash:await sha256(refresh),clientId,userId:user.id,scope:row.scope,expiresAt:refreshExpiry.toISOString(),credentialHash})
+      ])); } catch { return json3({error:"invalid_grant"},400); }
       const phoneVerified = user.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(user.id, user.phone).first() : null;
       const token = await idToken(env, { sub: user.id, aud: clientId, exp: Math.floor(accessExpiry.getTime() / 1e3), nonce: row.nonce || void 0, email: row.scope.includes("email") && user.email_verified_at ? user.email : void 0, email_verified: row.scope.includes("email") ? Boolean(user.email_verified_at) : void 0, phone_number: row.scope.includes("phone") && phoneVerified ? user.phone : void 0, phone_number_verified: row.scope.includes("phone") ? Boolean(phoneVerified) : void 0, name: row.scope.includes("profile") ? user.full_name : void 0 });
       const apiToken = clientId === "domislink-adstudio" ? await adstudioAccessToken(env, user.id) : access;
@@ -915,10 +925,10 @@ async function handle(request, env) {
       const user = await env.DB.prepare("SELECT id,email,full_name,email_verified_at,phone FROM users WHERE id=? AND status='active'").bind(row.user_id).first();
       if (!user) return json3({ error: "invalid_grant" }, 400);
       const access = randomToken(32), nextRefresh = randomToken(48), now = /* @__PURE__ */ new Date(), accessExpiry = new Date(now.getTime() + ACCESS_SECONDS * 1e3);
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO sso_access_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(access), clientId, user.id, row.scope, accessExpiry.toISOString()),
-        env.DB.prepare("INSERT INTO sso_refresh_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(nextRefresh), clientId, user.id, row.scope, new Date(now.getTime() + REFRESH_SECONDS * 1e3).toISOString())
-      ]);
+      try { requireGrantPair(await env.DB.batch([
+        guardedGrantInsert(env.DB,"sso_access_tokens",{tokenHash:await sha256(access),clientId,userId:user.id,scope:row.scope,expiresAt:accessExpiry.toISOString(),credentialHash}),
+        guardedGrantInsert(env.DB,"sso_refresh_tokens",{tokenHash:await sha256(nextRefresh),clientId,userId:user.id,scope:row.scope,expiresAt:new Date(now.getTime() + REFRESH_SECONDS * 1e3).toISOString(),credentialHash})
+      ])); } catch { return json3({error:"invalid_grant"},400); }
       const phoneVerified = user.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(user.id, user.phone).first() : null;
       const token = await idToken(env, { sub: user.id, aud: clientId, exp: Math.floor(accessExpiry.getTime() / 1e3), email: row.scope.includes("email") && user.email_verified_at ? user.email : void 0, email_verified: row.scope.includes("email") ? Boolean(user.email_verified_at) : void 0, phone_number: row.scope.includes("phone") && phoneVerified ? user.phone : void 0, phone_number_verified: row.scope.includes("phone") ? Boolean(phoneVerified) : void 0, name: row.scope.includes("profile") ? user.full_name : void 0 });
       const apiToken = clientId === "domislink-adstudio" ? await adstudioAccessToken(env, user.id) : access;
@@ -933,6 +943,7 @@ async function handle(request, env) {
   if (path === "/oauth/revoke" && request.method === "POST") {
     const form = await request.formData(), token = String(form.get("token") || ""), clientId = String(form.get("client_id") || ""), hash = await sha256(token), now = (/* @__PURE__ */ new Date()).toISOString();
     if (!token || !clientId) return json3({ error: "invalid_request" }, 400);
+    if (!await authenticateTokenClient(env.DB, form)) return json3({error:"invalid_client"},401);
     await env.DB.batch([
       env.DB.prepare("UPDATE sso_access_tokens SET revoked_at=? WHERE token_hash=? AND client_id=? AND revoked_at IS NULL").bind(now, hash, clientId),
       env.DB.prepare("UPDATE sso_refresh_tokens SET revoked_at=? WHERE token_hash=? AND client_id=? AND revoked_at IS NULL").bind(now, hash, clientId)
@@ -954,10 +965,30 @@ async function handle(request, env) {
     await env.DB.prepare("INSERT INTO platform_tenant_memberships(id,tenant_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,'owner','active',?,?) ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='owner',status='active',updated_at=excluded.updated_at").bind(crypto.randomUUID(), tenant.id, owner.id, now, now).run();
     return json3({ tenant_id: tenant.id, product_key: productKey, resource_id: resourceId, display_name: displayName }, 201);
   }
-  if (path.startsWith("/admin/clients") && request.method === "POST") {
+  if (request.method === "POST" && /^\/admin\/clients\/dl_[A-Za-z0-9_-]{20,128}\/(rotate|revoke)$/.test(path)) {
+    const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+    if (!env.SSO_ADMIN_API_KEY || supplied !== env.SSO_ADMIN_API_KEY) return json3({error:"unauthorized"},401);
+    const [, , , clientId, action] = path.split("/");
+    try {
+      if (action === "revoke") return json3({ok:await revokeConfidentialClient(env.DB,clientId)});
+      const row = await env.DB.prepare("SELECT secret_hash FROM sso_confidential_clients WHERE client_id=?").bind(clientId).first();
+      if (!row) return json3({error:"invalid_client"},404);
+      const result=await rotateConfidentialClient(env.DB,{clientId,previousHash:row.secret_hash});
+      return new Response(JSON.stringify(result),{status:200,headers:{"Content-Type":"application/json","Cache-Control":"no-store","Pragma":"no-cache"}});
+    } catch { return json3({error:"credential_operation_failed"},409); }
+  }
+  if (path === "/admin/clients" && request.method === "POST") {
     const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     if (!env.SSO_ADMIN_API_KEY || supplied !== env.SSO_ADMIN_API_KEY) return json3({ error: "unauthorized" }, 401);
     const body = await request.json();
+    if (body?.token_endpoint_auth_method === "client_secret_post") {
+      if (path !== "/admin/clients") return json3({ error: "invalid_client_registration" }, 400);
+      try {
+        const result = await registerConfidentialClient(env.DB, {clientId:"dl_"+randomToken(24),name:body.client_name,redirects:body.redirect_uris,scopes:body.allowed_scopes,now:new Date().toISOString()});
+        return new Response(JSON.stringify(result),{status:201,headers:{"Content-Type":"application/json","Cache-Control":"no-store","Pragma":"no-cache"}});
+      } catch { return json3({error:"client_registration_failed"},400); }
+    }
+    if (body?.token_endpoint_auth_method !== undefined && body.token_endpoint_auth_method !== "none") return json3({error:"invalid_client_registration"},400);
     const name = body.client_name?.trim(), redirects = body.redirect_uris;
     if (!name || !Array.isArray(redirects) || redirects.length < 1 || redirects.length > 20 || redirects.some((uri) => {
       try {
@@ -1051,6 +1082,7 @@ async function handle(request, env) {
 __name(handle, "handle");
 var index_default = {
   async fetch(request, env) {
+    if (stagingIdentity(env) && (!/^https:\/\/domislink-sso-confidential-staging\.[a-z0-9-]+\.workers\.dev$/.test(env.SSO_ISSUER || "") || env.APP_ORIGIN !== env.SSO_ISSUER || new URL(request.url).origin !== env.SSO_ISSUER)) return new Response("Invalid staging identity",{status:503});
     const response = await handle(request, env);
     const headers = new Headers(response.headers);
     const cors = corsHeaders(request, env);

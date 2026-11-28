@@ -1,0 +1,2 @@
+# Integrated deployment-version gate
+Version verifier CI 46163416060 passed. Installer now requires the operator-recorded expected version UUID to receive 100% traffic before the first secret write. Health is rechecked after writes. Secret writes can create new versions; post-install version identity remains explicitly unverified. Exclusive operator coordination remains mandatory; no atomic compare-and-swap guarantee. Tests simulate mismatched version and assert zero writes. No remote changes. Next secure local credential custody and operator deployment checkpoint.

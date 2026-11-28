@@ -1,0 +1,26 @@
+{
+  "name": "domislink-sso-confidential-staging",
+  "main": "recovered/index.js",
+  "compatibility_date": "2025-01-09",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": true,
+  "vars": {
+    "WORKER": "domislink-sso-confidential-staging",
+    "APP_ORIGIN": "https://domislink-sso-confidential-staging.REPLACE.workers.dev",
+    "SSO_ISSUER": "https://domislink-sso-confidential-staging.REPLACE.workers.dev",
+    "SSO_ALLOWED_ORIGINS": "",
+    "OIDC_KEY_ID": "domislink-sso-confidential-staging",
+    "WEBAUTHN_RP_ID": "domislink-sso-confidential-staging.REPLACE.workers.dev",
+    "WEBAUTHN_RP_NAME": "DomisLink Staging"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "domislink-sso-confidential-staging-db",
+      "database_id": "REPLACE",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# Deployed version acceptance
+Preflight CLI CI 46163319721 passed. Read-only deployment inventory compares the expected operator-recorded version UUID to the latest deployment and requires 100% traffic. Reject split traffic and mismatch. API response ordering and shape must be checked live. Version ID is not source digest proof; record it from trusted deployment output. Secret writes may create new versions; reverify after installation. No remote changes. Next wire into installer and operator CLI, and establish secure credential custody.

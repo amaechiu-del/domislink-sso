@@ -1,0 +1,2 @@
+# Inert staging bootstrap
+Credential preparation CI 46162750201 passed. Bootstrap worker exposes only exact staging GET /health, no authentication or execution, no DB binding. Config preparation verifies dedicated account/database and free-tier confirmation; returns review-only config, not deployment authorization. Before deploying check Worker absence independently; never replace an existing Worker. No remote deployment performed. Next implement create-only bootstrap verification and credential installation with explicit approval.
