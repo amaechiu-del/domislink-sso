@@ -27,3 +27,21 @@ test('disable atomically revokes only targeted persisted grants',async()=>{
  assert.equal(await revokeConfidentialClient(adapter,a),false);
  }finally{db.close()}
 });
+
+import {guardedGrantInsert,requireGrantPair} from '../confidential-client.mjs';
+test('grant insertion rejects stale secret hash and accepts current hash',()=>{
+ const db=new DatabaseSync(':memory:');try{
+ db.exec('CREATE TABLE users(id TEXT PRIMARY KEY);');
+ for(const file of ['0002_oidc_core.sql','0005_confidential_clients.sql','0007_enabled_grant_guard.sql'])db.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
+ db.exec("INSERT INTO users VALUES('u'); INSERT INTO sso_clients VALUES('c','c','[]','openid',1,'now')");
+ db.prepare("INSERT INTO sso_confidential_clients VALUES('c',?,'now')").run('b'.repeat(64));
+ const adapter={prepare:sql=>({bind:(...args)=>({run:()=>db.prepare(sql).run(...args)})})};
+ const grant={tokenHash:'t',clientId:'c',userId:'u',scope:'openid',expiresAt:'later'};
+ for(const table of ['sso_access_tokens','sso_refresh_tokens']){
+ assert.equal(guardedGrantInsert(adapter,table,{...grant,credentialHash:'a'.repeat(64)}).run().changes,0);
+ assert.equal(guardedGrantInsert(adapter,table,{...grant,credentialHash:null}).run().changes,0);
+ assert.equal(guardedGrantInsert(adapter,table,{...grant,credentialHash:'b'.repeat(64)}).run().changes,1);
+ }
+ assert.throws(()=>requireGrantPair([{success:true,meta:{changes:0}},{success:true,meta:{changes:0}}]));
+ }finally{db.close()}
+});

@@ -1,4 +1,4 @@
-import { authenticateTokenClient, registerConfidentialClient, rotateConfidentialClient, revokeConfidentialClient } from "../confidential-client.mjs";
+import { authenticateTokenClient, registerConfidentialClient, rotateConfidentialClient, revokeConfidentialClient, hashClientSecret, guardedGrantInsert, requireGrantPair } from "../confidential-client.mjs";
 import { sendSmsOtp } from "../sms.ts";
 import { handleRecovery } from "../recovery.ts";
 var __freeze = Object.freeze;
@@ -888,6 +888,7 @@ async function handle(request, env) {
   if (path === "/oauth/token" && request.method === "POST") {
     const form = await request.formData(), grant = String(form.get("grant_type") || ""), clientId = String(form.get("client_id") || "");
     if (!await authenticateTokenClient(env.DB, form)) return json3({ error: "invalid_client" }, 401);
+    const credentialHash = form.get("client_secret") === null ? null : await hashClientSecret(form.get("client_secret"));
     if (grant === "authorization_code") {
       const code = String(form.get("code") || ""), redirectUri = String(form.get("redirect_uri") || ""), verifier = String(form.get("code_verifier") || "");
       if (!code || !verifier || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return json3({ error: "invalid_grant" }, 400);
@@ -901,10 +902,10 @@ async function handle(request, env) {
       const user = await env.DB.prepare("SELECT id,email,full_name,email_verified_at,phone FROM users WHERE id=? AND status='active'").bind(row.user_id).first();
       if (!user) return json3({ error: "invalid_grant" }, 400);
       const access = randomToken(32), refresh = randomToken(48), now = /* @__PURE__ */ new Date(), accessExpiry = new Date(now.getTime() + ACCESS_SECONDS * 1e3), refreshExpiry = new Date(now.getTime() + REFRESH_SECONDS * 1e3);
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO sso_access_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(access), clientId, user.id, row.scope, accessExpiry.toISOString()),
-        env.DB.prepare("INSERT INTO sso_refresh_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(refresh), clientId, user.id, row.scope, refreshExpiry.toISOString())
-      ]);
+      try { requireGrantPair(await env.DB.batch([
+        guardedGrantInsert(env.DB,"sso_access_tokens",{tokenHash:await sha256(access),clientId,userId:user.id,scope:row.scope,expiresAt:accessExpiry.toISOString(),credentialHash}),
+        guardedGrantInsert(env.DB,"sso_refresh_tokens",{tokenHash:await sha256(refresh),clientId,userId:user.id,scope:row.scope,expiresAt:refreshExpiry.toISOString(),credentialHash})
+      ])); } catch { return json3({error:"invalid_grant"},400); }
       const phoneVerified = user.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(user.id, user.phone).first() : null;
       const token = await idToken(env, { sub: user.id, aud: clientId, exp: Math.floor(accessExpiry.getTime() / 1e3), nonce: row.nonce || void 0, email: row.scope.includes("email") && user.email_verified_at ? user.email : void 0, email_verified: row.scope.includes("email") ? Boolean(user.email_verified_at) : void 0, phone_number: row.scope.includes("phone") && phoneVerified ? user.phone : void 0, phone_number_verified: row.scope.includes("phone") ? Boolean(phoneVerified) : void 0, name: row.scope.includes("profile") ? user.full_name : void 0 });
       const apiToken = clientId === "domislink-adstudio" ? await adstudioAccessToken(env, user.id) : access;
@@ -917,10 +918,10 @@ async function handle(request, env) {
       const user = await env.DB.prepare("SELECT id,email,full_name,email_verified_at,phone FROM users WHERE id=? AND status='active'").bind(row.user_id).first();
       if (!user) return json3({ error: "invalid_grant" }, 400);
       const access = randomToken(32), nextRefresh = randomToken(48), now = /* @__PURE__ */ new Date(), accessExpiry = new Date(now.getTime() + ACCESS_SECONDS * 1e3);
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO sso_access_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(access), clientId, user.id, row.scope, accessExpiry.toISOString()),
-        env.DB.prepare("INSERT INTO sso_refresh_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,?,?,?)").bind(await sha256(nextRefresh), clientId, user.id, row.scope, new Date(now.getTime() + REFRESH_SECONDS * 1e3).toISOString())
-      ]);
+      try { requireGrantPair(await env.DB.batch([
+        guardedGrantInsert(env.DB,"sso_access_tokens",{tokenHash:await sha256(access),clientId,userId:user.id,scope:row.scope,expiresAt:accessExpiry.toISOString(),credentialHash}),
+        guardedGrantInsert(env.DB,"sso_refresh_tokens",{tokenHash:await sha256(nextRefresh),clientId,userId:user.id,scope:row.scope,expiresAt:new Date(now.getTime() + REFRESH_SECONDS * 1e3).toISOString(),credentialHash})
+      ])); } catch { return json3({error:"invalid_grant"},400); }
       const phoneVerified = user.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(user.id, user.phone).first() : null;
       const token = await idToken(env, { sub: user.id, aud: clientId, exp: Math.floor(accessExpiry.getTime() / 1e3), email: row.scope.includes("email") && user.email_verified_at ? user.email : void 0, email_verified: row.scope.includes("email") ? Boolean(user.email_verified_at) : void 0, phone_number: row.scope.includes("phone") && phoneVerified ? user.phone : void 0, phone_number_verified: row.scope.includes("phone") ? Boolean(phoneVerified) : void 0, name: row.scope.includes("profile") ? user.full_name : void 0 });
       const apiToken = clientId === "domislink-adstudio" ? await adstudioAccessToken(env, user.id) : access;
