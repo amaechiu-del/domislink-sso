@@ -1,3 +1,4 @@
+import {verifyBootstrapHealth} from './verify-bootstrap-health.mjs';
 import {inspectStagingSecrets,requiredSecrets} from './staging-secret-inventory.mjs';
 import {validateSigningPair} from './staging-signing.mjs';
 export async function installStagingCredentials(options){
@@ -7,6 +8,7 @@ export async function installStagingCredentials(options){
  const signing=validateSigningPair(secrets.OIDC_PRIVATE_KEY_PEM,secrets.OIDC_PUBLIC_KEY_PEM);
  const inventory=await inspectStagingSecrets(options);
  if(inventory.present.length!==0)throw Error('Existing credentials require separate rotation approval');
+ await verifyBootstrapHealth(options);
  const url='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/workers/scripts/'+config.name+'/secrets';
  try{
  for(const name of requiredSecrets){

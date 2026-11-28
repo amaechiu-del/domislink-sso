@@ -1,0 +1,2 @@
+# Bootstrap health acceptance
+Installer CI 46163089634 passed. Installer now requires exact staging health response before any PUT, using separate unauthenticated transport, no redirects, no credentials. Tests reject incompatible health before writes. Health is behavioral evidence only, not cryptographic artifact identity or account ownership; exclusive operator must independently verify deployed version and hostname/account mapping. No live checks or writes performed.
