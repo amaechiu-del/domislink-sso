@@ -1,0 +1,3 @@
+# Operator provisioning checkpoint
+
+Operator transcript confirms two dedicated D1 databases created and inspected, both initially empty. AI Studio native review passed on Windows at bfe177f. Wrangler auto-added both remote bindings to the default SSO config; restoration and independent overlay validation remain unconfirmed. Never deploy the default config. Bootstrap planning now requires account Workers subdomain to match the configured issuer. This is read-only and does not authorize deployment. Free plan confirmation, scoped API token, live subdomain check, migrations and credential custody remain pending. No production certification.
