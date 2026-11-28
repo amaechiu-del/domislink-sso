@@ -1,0 +1,3 @@
+# Runner authorization gate
+
+AI Studio verifier currently pins https://sso.domislink.com, audience domislink-rapid-build-runner, token_use access, rapidbuild:run, RS256, unique jti and maximum 300 seconds. It maps authorization to test capability only. Staging issuance must not impersonate the production issuer. The internal claims primitive is not an authorization mechanism and has no HTTP route. Next: dedicated runner registry, hashed credentials, enabled status and revocation, authenticated issuance, actual RSA signing and cross-repository verifier tests with explicit staging issuer pinning. No production token issuance or deployment is authorized. Secret inventory CI passed 46160927862.

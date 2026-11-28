@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {issueRunnerToken} from '../runner-token.mjs';
+const issuer='https://domislink-sso-confidential-staging.fixture.workers.dev',subject='runner_'+'a'.repeat(24);
+test('runner claims are fixed, short lived and unique',async()=>{const opts={issuer,subject,now:100,sign:async claims=>claims};const a=await issueRunnerToken(opts),b=await issueRunnerToken(opts);assert.equal(a.aud,'domislink-rapid-build-runner');assert.equal(a.scope,'rapidbuild:run');assert.equal(a.token_use,'access');assert.equal(a.exp-a.iat,300);assert.notEqual(a.jti,b.jti);for(const patch of [{ttl:301},{ttl:0},{subject:'ordinary-user'},{issuer:'https://sso.domislink.com'}])await assert.rejects(issueRunnerToken({...opts,...patch}));});
