@@ -1,3 +1,4 @@
+import {handleRunner} from "../runner-http.mjs";
 import { authenticateTokenClient, registerConfidentialClient, rotateConfidentialClient, revokeConfidentialClient, hashClientSecret, guardedGrantInsert, requireGrantPair } from "../confidential-client.mjs";
 import { sendSmsOtp } from "../sms.ts";
 import { handleRecovery } from "../recovery.ts";
@@ -790,6 +791,8 @@ __name(fetchCurrentUser, "fetchCurrentUser");
 async function handle(request, env) {
   const url = new URL(request.url), path = url.pathname;
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+  const runnerResponse=await handleRunner(request,env,claims=>idToken(env,claims));
+  if(runnerResponse)return runnerResponse;
   const recovery=await handleRecovery(request,env,path,{forgot:forgotPasswordHtml,reset:resetPasswordHtml,send:sendEmailOtp,limit:consumeRateLimit});
   if(recovery)return recovery;
   const identityChannelResponse = await handleIdentityChannel(request, env, path);
