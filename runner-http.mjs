@@ -1,3 +1,4 @@
+import {hashClientSecret} from './confidential-client.mjs';
 import {authenticateRunner,registerRunner,revokeRunner} from './runner-registry.mjs';
 import {issueRunnerToken} from './runner-token.mjs';
 const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','Pragma':'no-cache'}});
@@ -38,6 +39,8 @@ export async function handleRunner(request,env,sign){
  if(!await authenticateRunner(env.DB,body?.runner_id,body?.runner_secret))return reply({error:'invalid_client'},401);
  if(!await allowAttempt(env,'token:'+body.runner_id,12))return reply({error:'rate_limited'},429);
  const token=await issueRunnerToken({subject:body.runner_id,issuer:env.SSO_ISSUER,sign});
- if(!await authenticateRunner(env.DB,body.runner_id,body.runner_secret))return reply({error:'invalid_client'},401);
+ const hash=await hashClientSecret(body.runner_secret);
+ const active=await env.DB.prepare('SELECT runner_id FROM sso_engineering_runners WHERE runner_id=? AND secret_hash=? AND revoked_at IS NULL').bind(body.runner_id,hash).first();
+ if(active?.runner_id!==body.runner_id)return reply({error:'invalid_client'},401);
  return reply({access_token:token,token_type:'Bearer',expires_in:300,scope:'rapidbuild:run'});
 }
