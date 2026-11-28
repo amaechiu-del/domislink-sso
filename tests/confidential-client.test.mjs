@@ -40,3 +40,6 @@ test('real SQLite registration rollback, rotation CAS and revocation preserve co
  assert.equal(raw.prepare('SELECT count(*) n FROM sso_confidential_clients').get().n,1);
  }finally{raw.close()}
 });
+
+test('revocation rejects duplicate token fields',async()=>{const f=formFor(null);f.append('token','a');f.append('token','b');assert.equal(await authenticateTokenClient({},f),false)});
+test('gateway routes require admin and disabled clients cannot use opaque userinfo tokens',()=>{const src=readFileSync(new URL('../recovered/index.js',import.meta.url),'utf8');assert.match(src,/JOIN sso_clients c ON c.client_id=t.client_id AND c.enabled=1/);const start=src.indexOf('const [, , , clientId, action]');assert.ok(start>0);assert.match(src.slice(start-400,start),/SSO_ADMIN_API_KEY/);assert.match(src.slice(start,start+1100),/Cache-Control":"no-store"/)});

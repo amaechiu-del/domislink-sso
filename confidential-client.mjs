@@ -16,7 +16,7 @@ export async function authenticateClient({record,secret}){
 }
 
 export async function authenticateTokenClient(db,form){
- for(const key of ['client_id','client_secret','grant_type','code','redirect_uri','code_verifier','refresh_token']){
+ for(const key of ['client_id','client_secret','grant_type','code','redirect_uri','code_verifier','refresh_token','token']){
   const values=form.getAll(key);if(values.length>1||values.some(v=>typeof v!=='string'))return false;
  }
  const id=form.get('client_id');if(typeof id!=='string'||!id||id.length>256)return false;

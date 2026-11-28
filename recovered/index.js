@@ -1,4 +1,4 @@
-import { authenticateTokenClient, registerConfidentialClient } from "../confidential-client.mjs";
+import { authenticateTokenClient, registerConfidentialClient, rotateConfidentialClient, revokeConfidentialClient } from "../confidential-client.mjs";
 import { sendSmsOtp } from "../sms.ts";
 import { handleRecovery } from "../recovery.ts";
 var __freeze = Object.freeze;
@@ -778,7 +778,7 @@ __name(handleWhatsAppWebhook, "handleWhatsAppWebhook");
 async function fetchCurrentUser(request, env) {
   const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
-  const row = await env.DB.prepare("SELECT u.id,u.email,u.full_name,u.email_verified_at,u.phone,t.client_id,t.scope FROM sso_access_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>? AND u.status='active' LIMIT 1").bind(await sha256(token), (/* @__PURE__ */ new Date()).toISOString()).first();
+  const row = await env.DB.prepare("SELECT u.id,u.email,u.full_name,u.email_verified_at,u.phone,t.client_id,t.scope FROM sso_access_tokens t JOIN users u ON u.id=t.user_id JOIN sso_clients c ON c.client_id=t.client_id AND c.enabled=1 WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>? AND u.status='active' LIMIT 1").bind(await sha256(token), (/* @__PURE__ */ new Date()).toISOString()).first();
   if (!row) return null;
   const verifiedPhone = row.phone ? await env.DB.prepare("SELECT phone_e164 FROM sso_verified_phones WHERE user_id=? AND phone_e164=? LIMIT 1").bind(row.id, row.phone).first() : null;
   return { id: row.id, email: row.email_verified_at ? row.email : void 0, phone: verifiedPhone?.phone_e164, fullName: row.full_name, clientId: row.client_id, scope: row.scope };
@@ -935,6 +935,7 @@ async function handle(request, env) {
   if (path === "/oauth/revoke" && request.method === "POST") {
     const form = await request.formData(), token = String(form.get("token") || ""), clientId = String(form.get("client_id") || ""), hash = await sha256(token), now = (/* @__PURE__ */ new Date()).toISOString();
     if (!token || !clientId) return json3({ error: "invalid_request" }, 400);
+    if (!await authenticateTokenClient(env.DB, form)) return json3({error:"invalid_client"},401);
     await env.DB.batch([
       env.DB.prepare("UPDATE sso_access_tokens SET revoked_at=? WHERE token_hash=? AND client_id=? AND revoked_at IS NULL").bind(now, hash, clientId),
       env.DB.prepare("UPDATE sso_refresh_tokens SET revoked_at=? WHERE token_hash=? AND client_id=? AND revoked_at IS NULL").bind(now, hash, clientId)
@@ -956,7 +957,19 @@ async function handle(request, env) {
     await env.DB.prepare("INSERT INTO platform_tenant_memberships(id,tenant_id,user_id,role,status,created_at,updated_at) VALUES(?,?,?,'owner','active',?,?) ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='owner',status='active',updated_at=excluded.updated_at").bind(crypto.randomUUID(), tenant.id, owner.id, now, now).run();
     return json3({ tenant_id: tenant.id, product_key: productKey, resource_id: resourceId, display_name: displayName }, 201);
   }
-  if (path.startsWith("/admin/clients") && request.method === "POST") {
+  if (request.method === "POST" && /^\/admin\/clients\/dl_[A-Za-z0-9_-]{20,128}\/(rotate|revoke)$/.test(path)) {
+    const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+    if (!env.SSO_ADMIN_API_KEY || supplied !== env.SSO_ADMIN_API_KEY) return json3({error:"unauthorized"},401);
+    const [, , , clientId, action] = path.split("/");
+    try {
+      if (action === "revoke") return json3({ok:await revokeConfidentialClient(env.DB,clientId)});
+      const row = await env.DB.prepare("SELECT secret_hash FROM sso_confidential_clients WHERE client_id=?").bind(clientId).first();
+      if (!row) return json3({error:"invalid_client"},404);
+      const result=await rotateConfidentialClient(env.DB,{clientId,previousHash:row.secret_hash});
+      return new Response(JSON.stringify(result),{status:200,headers:{"Content-Type":"application/json","Cache-Control":"no-store","Pragma":"no-cache"}});
+    } catch { return json3({error:"credential_operation_failed"},409); }
+  }
+  if (path === "/admin/clients" && request.method === "POST") {
     const supplied = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
     if (!env.SSO_ADMIN_API_KEY || supplied !== env.SSO_ADMIN_API_KEY) return json3({ error: "unauthorized" }, 401);
     const body = await request.json();
