@@ -14,3 +14,13 @@ export async function authenticateClient({record,secret}){
  let diff=0;for(let i=0;i<64;i++)diff|=actual.charCodeAt(i)^record.secret_hash.charCodeAt(i);
  return diff===0;
 }
+
+export async function authenticateTokenClient(db,form){
+ for(const key of ['client_id','client_secret','grant_type','code','redirect_uri','code_verifier','refresh_token']){
+  const values=form.getAll(key);if(values.length>1||values.some(v=>typeof v!=='string'))return false;
+ }
+ const id=form.get('client_id');if(typeof id!=='string'||!id||id.length>256)return false;
+ const row=await db.prepare('SELECT c.client_id, s.secret_hash FROM sso_clients c LEFT JOIN sso_confidential_clients s ON s.client_id=c.client_id WHERE c.client_id=? AND c.enabled=1').bind(id).first();
+ if(!row||row.client_id!==id)return false;
+ return authenticateClient({record:row.secret_hash===null?null:row,secret:form.get('client_secret')});
+}

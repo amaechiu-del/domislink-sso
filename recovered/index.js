@@ -1,3 +1,4 @@
+import { authenticateTokenClient } from "../confidential-client.mjs";
 import { sendSmsOtp } from "../sms.ts";
 import { handleRecovery } from "../recovery.ts";
 var __freeze = Object.freeze;
@@ -886,6 +887,7 @@ async function handle(request, env) {
   }
   if (path === "/oauth/token" && request.method === "POST") {
     const form = await request.formData(), grant = String(form.get("grant_type") || ""), clientId = String(form.get("client_id") || "");
+    if (!await authenticateTokenClient(env.DB, form)) return json3({ error: "invalid_client" }, 401);
     if (grant === "authorization_code") {
       const code = String(form.get("code") || ""), redirectUri = String(form.get("redirect_uri") || ""), verifier = String(form.get("code_verifier") || "");
       if (!code || !verifier || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return json3({ error: "invalid_grant" }, 400);
