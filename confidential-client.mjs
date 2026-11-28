@@ -36,3 +36,16 @@ export async function registerConfidentialClient(db,{clientId,name,redirects,sco
  if(!Array.isArray(results)||results.length!==2||results.some(r=>r.success!==true))throw Error('Registration failed');
  return {client_id:clientId,client_name:name,redirect_uris:redirects,allowed_scopes:scopes,client_secret:secret,token_endpoint_auth_method:'client_secret_post'};
 }
+
+export async function rotateConfidentialClient(db,{clientId,previousHash}){
+ if(typeof clientId!=='string'||!/^dl_[A-Za-z0-9_-]{20,128}$/.test(clientId)||typeof previousHash!=='string'||!/^[0-9a-f]{64}$/.test(previousHash))throw Error('Invalid rotation');
+ const {secret,secretHash}=await generateClientSecret();
+ const row=await db.prepare('UPDATE sso_confidential_clients SET secret_hash=? WHERE client_id=? AND secret_hash=? AND EXISTS (SELECT 1 FROM sso_clients c WHERE c.client_id=sso_confidential_clients.client_id AND c.enabled=1) RETURNING client_id').bind(secretHash,clientId,previousHash).first();
+ if(!row||row.client_id!==clientId)throw Error('Rotation conflict');
+ return {client_id:clientId,client_secret:secret};
+}
+export async function revokeConfidentialClient(db,clientId){
+ if(typeof clientId!=='string'||!/^dl_[A-Za-z0-9_-]{20,128}$/.test(clientId))throw Error('Invalid revocation');
+ const row=await db.prepare('UPDATE sso_clients SET enabled=0 WHERE client_id=? AND enabled=1 AND EXISTS (SELECT 1 FROM sso_confidential_clients s WHERE s.client_id=sso_clients.client_id) RETURNING client_id').bind(clientId).first();
+ return row?.client_id===clientId;
+}
