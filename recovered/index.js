@@ -816,7 +816,8 @@ async function handle(request, env) {
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["RS256"],
     scopes_supported: ["openid", "profile", "email", "phone"],
-    token_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: ["none", "client_secret_post"],
+    revocation_endpoint_auth_methods_supported: ["none", "client_secret_post"],
     code_challenge_methods_supported: ["S256"]
   });
   if (path === "/oauth/jwks") {

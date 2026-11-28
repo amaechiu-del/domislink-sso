@@ -32,3 +32,5 @@ test('actual gateway public and confidential code and refresh exchanges',async()
  }
  }finally{raw.close()}
 });
+
+test('discovery advertises implemented public and confidential authentication',async()=>{const response=await gateway.fetch(new Request('https://sso.domislink.com/.well-known/openid-configuration'),{});assert.equal(response.status,200);const d=await response.json();assert.deepEqual(d.token_endpoint_auth_methods_supported,['none','client_secret_post']);assert.deepEqual(d.revocation_endpoint_auth_methods_supported,['none','client_secret_post']);assert.deepEqual(d.code_challenge_methods_supported,['S256']);assert.ok(d.grant_types_supported.includes('authorization_code'));assert.ok(d.grant_types_supported.includes('refresh_token'));assert.deepEqual(d.id_token_signing_alg_values_supported,['RS256']);});
