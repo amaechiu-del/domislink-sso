@@ -1,0 +1,2 @@
+# Bootstrap target preflight
+Bootstrap CI 46162875761 passed. Read-only account, D1 and Worker inventory preflight refuses existing target or visibly incomplete inventory. Absence is a snapshot, not a create-only guarantee; Cloudflare upload can replace a script. Require exclusive operator coordination and fresh inventory immediately before any separately authorized bootstrap upload. No deployment performed. Live API response shape and pagination remain unverified.
