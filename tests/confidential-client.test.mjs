@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {generateClientSecret,authenticateClient} from '../confidential-client.mjs';
+test('public clients remain public and reject supplied secrets',async()=>{assert.equal(await authenticateClient({record:null,secret:null}),true);assert.equal(await authenticateClient({record:null,secret:'bad'}),false)});
+test('confidential clients require exact generated secret',async()=>{const a=await generateClientSecret(),b=await generateClientSecret();assert.notEqual(a.secret,b.secret);const record={secret_hash:a.secretHash};assert.equal(await authenticateClient({record,secret:a.secret}),true);assert.equal(await authenticateClient({record,secret:b.secret}),false);assert.equal(await authenticateClient({record,secret:null}),false)});
+test('malformed or missing lookup fails closed',async()=>{assert.equal(await authenticateClient({record:undefined,secret:null}),false);assert.equal(await authenticateClient({record:{secret_hash:'bad'},secret:null}),false)});
