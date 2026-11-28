@@ -6,7 +6,7 @@ import {revokeConfidentialClient} from '../confidential-client.mjs';
 test('disable atomically revokes only targeted persisted grants',async()=>{
  const db=new DatabaseSync(':memory:');try{
  db.exec('PRAGMA foreign_keys=ON; CREATE TABLE users(id TEXT PRIMARY KEY);');
- for(const file of ['0002_oidc_core.sql','0005_confidential_clients.sql','0006_confidential_revocation.sql'])db.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
+ for(const file of ['0002_oidc_core.sql','0005_confidential_clients.sql','0006_confidential_revocation.sql','0007_enabled_grant_guard.sql'])db.exec(readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8'));
  db.exec("INSERT INTO users VALUES('u')");
  const a='dl_'+'a'.repeat(24),b='dl_'+'b'.repeat(24);
  for(const id of [a,b]){
@@ -21,6 +21,9 @@ test('disable atomically revokes only targeted persisted grants',async()=>{
  assert.ok(db.prepare('SELECT '+col+' v FROM '+table+' WHERE client_id=?').get(a).v);
  assert.equal(db.prepare('SELECT '+col+' v FROM '+table+' WHERE client_id=?').get(b).v,null);
  }
+ for(const table of ['sso_access_tokens','sso_refresh_tokens'])assert.throws(()=>db.prepare("INSERT INTO "+table+"(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,'u','openid','later')").run('late',a),/client disabled/);
+ assert.throws(()=>db.prepare("INSERT INTO sso_authorization_codes(code_hash,client_id,user_id,redirect_uri,code_challenge,scope,expires_at) VALUES(?,?,'u','https://example.com','x','openid','later')").run('late',a),/client disabled/);
+ db.prepare("INSERT INTO sso_access_tokens(token_hash,client_id,user_id,scope,expires_at) VALUES(?,?,'u','openid','later')").run('unrelated',b);
  assert.equal(await revokeConfidentialClient(adapter,a),false);
  }finally{db.close()}
 });
