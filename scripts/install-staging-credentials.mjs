@@ -1,3 +1,4 @@
+import {verifyDeployedVersion} from './verify-deployed-version.mjs';
 import {verifyBootstrapHealth} from './verify-bootstrap-health.mjs';
 import {inspectStagingSecrets,requiredSecrets} from './staging-secret-inventory.mjs';
 import {validateSigningPair} from './staging-signing.mjs';
@@ -9,14 +10,16 @@ export async function installStagingCredentials(options){
  const inventory=await inspectStagingSecrets(options);
  if(inventory.present.length!==0)throw Error('Existing credentials require separate rotation approval');
  await verifyBootstrapHealth(options);
+ await verifyDeployedVersion(options);
  const url='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/workers/scripts/'+config.name+'/secrets';
  try{
  for(const name of requiredSecrets){
  const response=await fetcher(url,{method:'PUT',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({name,text:secrets[name],type:'secret_text'}),redirect:'error',signal:AbortSignal.timeout(15000)});
  if(!response.ok||(await response.json())?.success!==true)throw Error('Write rejected');
  }
+ await verifyBootstrapHealth(options);
  const after=await inspectStagingSecrets(options);
  if(!after.allPresent)throw Error('Inventory incomplete');
  }catch{throw Error('Installation uncertain or partial; stop and reconcile inventory. Do not retry automatically.')}
- return {allPresent:true,fingerprint:signing.fingerprint,valuesVerified:false,deploymentAuthorized:false};
+ return {allPresent:true,fingerprint:signing.fingerprint,valuesVerified:false,postInstallVersionVerified:false,deploymentAuthorized:false};
 }
